@@ -2,6 +2,7 @@
 import fs from 'fs';
 
 const UrlController = {};
+export default UrlController;
 
 UrlController.createSingleUrl = async(req,res) => {
     try{

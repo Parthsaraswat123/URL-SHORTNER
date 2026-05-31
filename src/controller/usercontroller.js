@@ -1,6 +1,7 @@
 
 
 const UserController = {};
+export default UserController;
 
 UserController.signUp = async (req, res) => {
     try {
