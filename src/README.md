@@ -18,7 +18,7 @@ A highly performant and secure URL Shortener service built with **Node.js**, **E
 ## 📁 Directory Structure
 
 ```text
-URL-SHORTNER/
+URL-SHORTNER/src/
 ├── DatabaseConnection/
 │   ├── postgresConnections.js  # PostgreSQL client connection pooling
 │   └── redisConnection.js      # Redis client initialization for caching
