@@ -5,7 +5,8 @@ CREATE TABLE users (
     phone_no VARCHAR(10) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
     -- CONSTRAINT idx_email UNIQUE (email),
     -- CONSTRAINT idx_phone_no UNIQUE (phone_no)
 );

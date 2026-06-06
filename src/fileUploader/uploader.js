@@ -1,7 +1,12 @@
 import fs from 'fs';
 import path from 'path';
-import Pool from '../DatabaseConnection/postgresConnections';
-import {nanoid} from 'nanoid';
+import { fileURLToPath } from 'url';
+import csv from 'csv-parser';
+import { nanoid } from 'nanoid';
+import { pool } from '../DatabaseConnection/postgresConnections.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const BATCH_SIZE = 1000;
 
@@ -9,53 +14,31 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function insertBatch(batch) {
-
+async function insertBatch(batch, userId) {
+    if (!batch || batch.length === 0) return 0;
+    
     const values = [];
     const placeholders = [];
+    const expiryDate = new Date(Date.now() + 48 * 60 * 60 * 1000);
 
     batch.forEach((url, index) => {
-        placeholders.push(`($${index + 1})`);
-        values.push(url);
+        const baseIndex = index * 4;
+        placeholders.push(`($${baseIndex + 1}, $${baseIndex + 2}, $${baseIndex + 3}, $${baseIndex + 4})`);
+        values.push(url, nanoid(8), expiryDate, userId);
     });
 
     const query = `
-        INSERT INTO urls(long_url)
+        INSERT INTO urls(original_url, short_url, expiry_date, user_id)
         VALUES ${placeholders.join(",")}
         RETURNING id
     `;
 
-    const result = await Pool.query(query, values);
-
-    const updates = [];
-
-    result.rows.forEach(row => {
-        updates.push({
-            id: row.id,
-            shortCode:nanoid.generate(8)
-        });
-    });
-
-    const updatePromises = updates.map(item =>
-        Pool.query(
-            `
-            UPDATE urls
-            SET short_url = $1
-            WHERE id = $2
-            `,
-            [item.shortCode, item.id]
-        )
-    );
-
-    await Promise.all(updatePromises);
-
-    return updates.length;
+    const result = await pool.query(query, values);
+    return result.rowCount;
 }
 
 async function processFile(job) {
-
     return new Promise((resolve, reject) => {
-
         const filePath = path.join(
             __dirname,
             "../uploads",
@@ -65,25 +48,28 @@ async function processFile(job) {
         const batch = [];
         let processed = 0;
 
+        if (!fs.existsSync(filePath)) {
+            return reject(new Error(`File not found: ${filePath}`));
+        }
+
         const stream = fs
             .createReadStream(filePath)
             .pipe(csv());
 
         stream.on("data", async row => {
-
             stream.pause();
-
             try {
-
-                batch.push(row.long_url);
+                // Read row.long_url or row.original_url
+                const url = row.long_url || row.original_url || row.url;
+                if (url) {
+                    batch.push(url);
+                }
 
                 if (batch.length >= BATCH_SIZE) {
-
-                    processed += await insertBatch(batch);
-
+                    processed += await insertBatch(batch, job.user_id);
                     batch.length = 0;
 
-                    await Pool.query(
+                    await pool.query(
                         `
                         UPDATE import_jobs
                         SET processed_records = $1
@@ -92,23 +78,19 @@ async function processFile(job) {
                         [processed, job.id]
                     );
                 }
-
             } catch (err) {
                 return reject(err);
             }
-
             stream.resume();
         });
 
         stream.on("end", async () => {
-
             try {
-
                 if (batch.length > 0) {
-                    processed += await insertBatch(batch);
+                    processed += await insertBatch(batch, job.user_id);
                 }
 
-                await Pool.query(
+                await pool.query(
                     `
                     UPDATE import_jobs
                     SET
@@ -118,9 +100,7 @@ async function processFile(job) {
                     `,
                     [processed, job.id]
                 );
-
                 resolve();
-
             } catch (err) {
                 reject(err);
             }
@@ -131,13 +111,12 @@ async function processFile(job) {
 }
 
 async function getNextJob() {
-    const client = await Pool.connect();
-
+    const client = await pool.connect();
     try {
         await client.query("BEGIN");
 
         const result = await client.query(`
-            SELECT id,file_name
+            SELECT id, file_name, user_id
             FROM import_jobs
             WHERE status = 'PENDING'
             ORDER BY id
@@ -162,9 +141,7 @@ async function getNextJob() {
         );
 
         await client.query("COMMIT");
-
         return job;
-
     } catch (err) {
         await client.query("ROLLBACK");
         throw err;
@@ -173,31 +150,42 @@ async function getNextJob() {
     }
 }
 
-
-const mainWorker = async() => {
+const mainWorker = async () => {
     try {
-        while(true) {
-        let getJob = await getNextJob();
-        
-        if (!getJob) {
-            await sleep(5000);
-            continue;
+        console.log("Bulk upload worker started...");
+        while (true) {
+            let job = await getNextJob();
+            if (!job) {
+                await sleep(5000);
+                continue;
+            }
+            console.time('Processing Job ' + job.id);
+            console.log(`Processing Job ${job.id}: ${job.file_name}`);
+            try {
+                await processFile(job);
+                console.log(`Completed Job ${job.id}`);
+            } catch (jobError) {
+                console.error(`Error processing Job ${job.id}:`, jobError);
+                await pool.query(
+                    `
+                    UPDATE import_jobs
+                    SET status='FAILED'
+                    WHERE id=$1
+                    `,
+                    [job.id]
+                );
+            }
+            console.timeEnd('Processing Job ' + job.id);
         }
-
-        console.log(
-                `Processing Job ${job.id}`
-            );
-
-            await processFile(job);
-
-            console.log(
-                `Completed Job ${job.id}`
-            );
-        
+    } catch (error) {
+        console.error("Worker encountered a fatal error:", error);
     }
-    }
-    catch(error){
-
-    }
-    
 }
+
+// Self-run worker if executed directly
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+
+    mainWorker();
+}
+
+// export { mainWorker };

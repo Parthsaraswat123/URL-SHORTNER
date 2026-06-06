@@ -2,22 +2,22 @@ import { Pool } from 'pg';
 import dotenv from 'dotenv';
 dotenv.config();
 
+export const pool = new Pool({
+    host: "localhost",
+    port: 5432,
+    database: "url_shortner",
+    user: "postgres",
+    password: "Be$t@1ps!",
+    max: 50,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000
+});
+
 export async function PostgresConnection() {
     try {
-        const pgConnection = new Pool({
-            host: "localhost",
-            port: 5432,
-            database: "url_shortener",
-            user: "admin",
-            // password: "password",
-            max: 50,
-            idleTimeoutMillis: 30000,
-            connectionTimeoutMillis: 2000
-        });
-
-        await pgConnection.connect();
+        await pool.connect();
         console.log("Postgres connected successfully !");
-        return pgConnection;
+        return pool;
         
     }
     catch(error){

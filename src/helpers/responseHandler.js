@@ -29,3 +29,5 @@ ResponseHandler.error = (res, error, statusCode = 500) => {
     }
 
 }
+
+export default ResponseHandler;
